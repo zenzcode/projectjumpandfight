@@ -65,11 +65,16 @@ namespace Player
 
         [Header("Coyote Time Settings")] [Tooltip("Sets time in Seconds for Coyote time")]
         public float coyoteTime = 3f;
+
+        [Header("Jump Settings")] [Tooltip("Time after a jump until jump is reactivated")]
+        private float jumpDelay = 3f;
         #endregion
         
         #region Data
         //Used to avoid jittery rotation
-        private float rotationX;
+        private float _rotationX;
+        //determines if player is ready to jump
+        private bool _readyToJump;
         #endregion
 
         #region Functions Movement Related
@@ -79,6 +84,7 @@ namespace Player
             _playerHeight = transform.localScale.y;
             Cursor.visible = false;
             Cursor.lockState = CursorLockMode.Locked;
+            _readyToJump = true;
         }
 
         private void FixedUpdate()
@@ -117,8 +123,14 @@ namespace Player
         {
             //Add gravity downwards to prevent flying to the mars
             playerRigidbody.AddForce(Vector3.down * (Time.deltaTime * extraGravityMultiplicator));
+
+            if (_readyToJump && _isJumping)
+            {
+                PerformJump();
+            }
         }
 
+        //Calculates and sets new Mouse position
         private void MouseLook()
         {
             var currentRotation = playerCam.transform.localRotation.eulerAngles;
@@ -130,14 +142,31 @@ namespace Player
             desiredY = currentRotation.y + (mouseXInput * Time.deltaTime * sensitivityMultiplier * mouseSensitivity);
 
             //Calculate new Value for X-Axis rotation
-            rotationX += (mouseYInput * Time.deltaTime * sensitivityMultiplier * mouseSensitivity);
+            _rotationX += (mouseYInput * Time.deltaTime * sensitivityMultiplier * mouseSensitivity);
             //Clamp angle so we cant do 360* up/down rotations
-            rotationX = Mathf.Clamp(rotationX, -90f, 90f);
+            _rotationX = Mathf.Clamp(_rotationX, -90f, 90f);
 
             //set new localRotation to a rotation rotated n degrees about axis 
-            playerCam.transform.localRotation = Quaternion.Euler(rotationX, desiredY, 0);
+            playerCam.transform.localRotation = Quaternion.Euler(_rotationX, desiredY, 0);
             //set orientation to be facing forward in new direction
             orientation.transform.localRotation = Quaternion.Euler(0, desiredY, 0);
+        }
+        
+        //Checks and Performs jump
+        private void PerformJump()
+        {
+            if (!_readyToJump || !_isGrounded) return;
+            //Add Jump Force to player
+            playerRigidbody.AddForce(Vector3.up * (jumpMultiplier * Time.deltaTime));
+            _readyToJump = false;
+
+            Invoke(nameof(ReactivateJump), jumpDelay);
+        }
+        
+        //Reactivates Jump ability after a defined delay
+        private void ReactivateJump()
+        {
+            _readyToJump = true;
         }
 
         #endregion
@@ -177,8 +206,20 @@ namespace Player
                 if (IsSlopeWalkable(normal))
                 {
                     _isGrounded = true;
+                    CancelInvoke(nameof(ResetGrounded));
+                }
+
+                if (_isGrounded)
+                {
+                    Invoke(nameof(ResetGrounded), Time.deltaTime*3f);
                 }
             }
+        }
+        
+        //Resets grounded state
+        private void ResetGrounded()
+        {
+            _isGrounded = false;
         }
 
         private bool IsSlopeWalkable(Vector3 normal)
