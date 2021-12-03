@@ -17,6 +17,7 @@
           </e>
           <e p="Player" t="Include">
             <e p="Movement.cs" t="Include" />
+            <e p="MultiplayerMovement.cs" t="Include" />
           </e>
         </e>
         <e p="Thirdparty" t="Include">

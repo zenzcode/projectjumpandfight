@@ -68,6 +68,10 @@ namespace Player
 
         [Header("Jump Settings")] [Tooltip("Time after a jump until jump is reactivated")]
         private float jumpDelay = 3f;
+
+        [Header("Counter Movement Settings")]
+        [Tooltip("Counter Movement Modifier, Slows down or fastens Counter Movement")]
+        public float counterModifier = 0.3f;
         #endregion
         
         #region Data
@@ -87,14 +91,8 @@ namespace Player
             _readyToJump = true;
         }
 
-        private void FixedUpdate()
-        {
-            PhysicBasedMovement();
-        }
-
         private void Update()
         {
-            print("Player Grounded? " + _isGrounded);
             CheckInput();
             CallInputFunctions();
             MouseLook();
@@ -118,15 +116,19 @@ namespace Player
             transform.position = new Vector3(transform.position.x, transform.position.y + playerCrouchHeight, transform.position.z);
         }
 
-        //Actual Movement Function which handles counter movement, speed, ...
-        private void PhysicBasedMovement()
-        {
-            //Add gravity downwards to prevent flying to the mars
-            playerRigidbody.AddForce(Vector3.down * (Time.deltaTime * extraGravityMultiplicator));
-
-            if (_readyToJump && _isJumping)
+        //Adds some counter movement
+        private void CounterMovement(Vector2 relativeVelocity)
+        {            
+            //handling letting go of key,                                       switch directions
+            if (Math.Abs(relativeVelocity.x) > 0.01f && Math.Abs(_x) < 0.05f || relativeVelocity.x < -0.01f && _x > 0 || relativeVelocity.x > 0.01f && _x < 0)
             {
-                PerformJump();
+                playerRigidbody.AddForce(orientation.transform.right * (walkMultiplier * (Time.deltaTime * -relativeVelocity.x * counterModifier)));
+            }
+            
+            //handling letting go of key,                                       switch directions
+            if (Math.Abs(relativeVelocity.y) > 0.01f && Math.Abs(_y) < 0.05f || relativeVelocity.y < -0.01f && _y > 0 || relativeVelocity.y > 0.01f && _y < 0)
+            {
+                playerRigidbody.AddForce(orientation.transform.forward * (walkMultiplier * (Time.deltaTime * -relativeVelocity.y * counterModifier)));
             }
         }
 
@@ -195,27 +197,24 @@ namespace Player
                 StopCrouch();
             }
         }
-
-        //we need this to calculate slope of object player is standing on and determine grounded status
-        private void OnCollisionStay(Collision other)
-        {
-            //loop through all contacted points
-            foreach (var point in other.contacts)
-            {
-                var normal = point.normal;
-                if (IsSlopeWalkable(normal))
-                {
-                    _isGrounded = true;
-                    CancelInvoke(nameof(ResetGrounded));
-                }
-
-                if (_isGrounded)
-                {
-                    Invoke(nameof(ResetGrounded), Time.deltaTime*3f);
-                }
-            }
-        }
         
+        //kind of stolen from karlson but it works
+        //not good at physics nor maths, ngl
+        private Vector2 FindVelRelativeToLook()
+        {
+            var lookAngle = orientation.transform.eulerAngles.y;
+            var moveAngle = Mathf.Atan2(playerRigidbody.velocity.x, playerRigidbody.velocity.z) * Mathf.Rad2Deg;
+
+            var u = Mathf.DeltaAngle(lookAngle, moveAngle);
+            var v = 90 - u;
+
+            var magnitude = playerRigidbody.velocity.magnitude;
+            var magY = magnitude * Mathf.Cos(u * Mathf.Deg2Rad);
+            var magX = magnitude * Mathf.Cos(v * Mathf.Deg2Rad);
+
+            return new Vector2(magX, magY);
+        }
+
         //Resets grounded state
         private void ResetGrounded()
         {
