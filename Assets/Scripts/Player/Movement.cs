@@ -1,6 +1,10 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
+using System.Runtime.Serialization.Formatters.Binary;
+using Mirror;
+using Misc;
 using UnityEngine;
 
 //Physic Based Movement for Jump and Fight
@@ -8,7 +12,7 @@ using UnityEngine;
 namespace Player
 {
     [RequireComponent(typeof(Rigidbody))]
-    public class Movement : SingletonMonoBehaviour<Player.Movement>
+    public class Movement : NetworkBehaviour
     {
         #region Inputs
         //player inputs
@@ -72,6 +76,9 @@ namespace Player
         [Header("Counter Movement Settings")]
         [Tooltip("Counter Movement Modifier, Slows down or fastens Counter Movement")]
         public float counterModifier = 0.3f;
+
+        [Header("Ground Settings")] [Tooltip("Layer(s) that is/are ground")]
+        public LayerMask groundLayer;
         #endregion
         
         #region Data
@@ -81,21 +88,122 @@ namespace Player
         private bool _readyToJump;
         #endregion
 
-        #region Functions Movement Related
-        protected override void Awake()
+        #region Server Functions
+    
+        [Command]
+        private void CmdSimulateMove(byte[] serializedBytes)
         {
-            base.Awake();
+            var playerState = Deserialize(serializedBytes);
+            PhysicsMovement(playerState.Input.x, playerState.Input.y, playerState.DeltaTime);
+            if ((playerState.Position - playerRigidbody.position).magnitude > 10f)
+            {
+                
+                RPCResetClient(connectionToClient, playerState.Position, playerRigidbody.position);
+            }
+        }
+
+        [TargetRpc]
+        private void RPCResetClient(NetworkConnection connection, Vector3 clientPos, Vector3 serverPos)
+        {
+            transform.position = serverPos;
+        }
+
+        
+        //serialize custom type over network
+        private byte[] Serialize(PlayerState playerState)
+        {
+            var memoryStream = new MemoryStream();
+            var binaryWriter = new BinaryWriter((memoryStream));
+            binaryWriter.Write(playerState.Input.x);
+            binaryWriter.Write(playerState.Input.y);
+            binaryWriter.Write(playerState.Position.x);
+            binaryWriter.Write(playerState.Position.y);
+            binaryWriter.Write(playerState.Position.z);
+            binaryWriter.Write(playerState.DeltaTime);
+            binaryWriter.Close();
+            return memoryStream.ToArray();
+        }
+
+        private PlayerState Deserialize(byte[] bytes)
+        {
+            var memoryStream = new MemoryStream(bytes);
+            var binaryReader = new BinaryReader(memoryStream);
+            float inputX = 0, inputY = 0, posX = 0, posY = 0, posZ = 0, deltaTime= 0 ;
+            inputX = binaryReader.ReadSingle();
+            inputY = binaryReader.ReadSingle();
+            posX = binaryReader.ReadSingle();
+            posY = binaryReader.ReadSingle();
+            posZ = binaryReader.ReadSingle();
+            deltaTime = binaryReader.ReadSingle();
+            binaryReader.Close();
+            return new PlayerState(new Vector2(inputX, inputY), new Vector3(posX, posY, posZ), deltaTime);
+        }
+        #endregion
+
+        #region Functions Movement Related
+        protected void Awake()
+        {
             _playerHeight = transform.localScale.y;
             Cursor.visible = false;
             Cursor.lockState = CursorLockMode.Locked;
             _readyToJump = true;
         }
 
+        private void Start()
+        {
+            if (!isLocalPlayer) return;
+            playerCam.gameObject.SetActive(true);
+        }
+
+        [ClientCallback]
         private void Update()
         {
-            CheckInput();
+            if (!isLocalPlayer) return;
+            CheckInput(); 
             CallInputFunctions();
             MouseLook();
+        }
+
+        [ClientCallback]
+        private void FixedUpdate()
+        {
+            if (!isLocalPlayer) return;
+            PhysicsMovement(_x, _y, Time.deltaTime);
+        }
+
+        //handles actual movement
+        private void PhysicsMovement(float x, float y, float delta)
+        {
+            //add extra gravity downwards
+            playerRigidbody.AddForce(Vector3.down * (delta * extraGravityMultiplicator));
+
+            //if grounded and jump key pressed, perform jump
+            if (_isGrounded && _isJumping)
+            {
+                PerformJump();
+            }
+            
+            //calculate velocity relative to look 
+            var mag = FindVelRelativeToLook();
+            
+            //perform counter movement so we dont go yeet into space
+            CounterMovement(mag);
+
+            //check if we go brrrr, then reset input
+            if (x > 0 && mag.x > playerMaxSpeed) x = 0;
+            if (x < 0 && mag.x < -playerMaxSpeed) x = 0;
+            if (y > 0 && mag.y > playerMaxSpeed) y = 0;
+            if (y < 0 && mag.y < -playerMaxSpeed) y = 0;
+            
+            //add actual movement force
+            playerRigidbody.AddForce(orientation.transform.right * (x * delta * walkMultiplier));
+            playerRigidbody.AddForce(orientation.transform.forward * (y * delta * walkMultiplier));
+            //Simulate Move on Server
+            if (isServer) return;
+            if (Math.Abs(x) < 0 || Mathf.Abs(y) < 0) return;
+            var currentPlayerState = new PlayerState(new Vector2(x, y), playerRigidbody.position, delta);
+            CmdSimulateMove(Serialize(currentPlayerState));
+
         }
 
         //function that handles functionality to start crouching
@@ -172,7 +280,7 @@ namespace Player
         }
 
         #endregion
-        
+
         #region Getters Setters and Checks
 
         private void CheckInput()
@@ -184,6 +292,7 @@ namespace Player
             _isSprinting = Input.GetKeyDown(KeyCode.LeftShift);
             _isCrouching = Input.GetKeyDown(KeyCode.LeftControl);
             _isJumping = Input.GetKey(KeyCode.Space);
+            
         }
 
         private void CallInputFunctions()
@@ -213,6 +322,23 @@ namespace Player
             var magX = magnitude * Mathf.Cos(v * Mathf.Deg2Rad);
 
             return new Vector2(magX, magY);
+        }
+
+        private void OnCollisionStay(Collision other)
+        {
+            var layerOfCollided = other.gameObject.layer;
+            if (layerOfCollided != groundLayer) return;
+            
+            foreach(var contact in other.contacts)
+            {
+                var normal = contact.normal;
+                if (IsSlopeWalkable(normal))
+                {
+                    _isGrounded = true;
+                    CancelInvoke(nameof(ResetGrounded));
+                }
+                Invoke(nameof(ResetGrounded), Time.deltaTime * coyoteTime);
+            }
         }
 
         //Resets grounded state
