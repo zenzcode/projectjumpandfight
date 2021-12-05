@@ -8,7 +8,7 @@ namespace FollowCamera
     {
         #region Assignable
 
-        public Player.Movement player;
+        public Player.Movement.Movement player;
 
         #endregion
 
