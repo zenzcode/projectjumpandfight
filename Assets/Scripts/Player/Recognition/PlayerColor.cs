@@ -10,12 +10,12 @@ namespace Player.Recognition
  public class PlayerColor : NetworkBehaviour
  {
      [SyncVar(hook = nameof(PlayerColorChanged))] private Color _playerColor;
- 
-     private void Start()
+
+     public override void OnStartServer()
      {
          SetRandomPlayerColor();
      }
- 
+
      private void SetRandomPlayerColor()
      {
          _playerColor = Random.ColorHSV();

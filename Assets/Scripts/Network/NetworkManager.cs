@@ -2,18 +2,25 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using Mirror;
-using Steam;
-using Steamworks;
+using Player.Recognition;
+using Unity.VisualScripting;
 using UnityEngine;
 
-public class NetworkManager : Mirror.NetworkManager
+namespace Network
 {
-    public static Action PlayerConnectedEvent;
-
-    public override void OnServerAddPlayer(NetworkConnection conn)
+    public class NetworkManager : Mirror.NetworkManager
     {
-        var playerObj = Instantiate(playerPrefab, new Vector3(33, 4, 60), Quaternion.identity);
-        NetworkServer.AddPlayerForConnection(conn, playerObj);
-        PlayerConnectedEvent?.Invoke();
-    }
+        
+        public override void OnServerAddPlayer(NetworkConnection conn)
+        {
+            var playerObj = Instantiate(playerPrefab, new Vector3(33, 4, 60), Quaternion.identity);
+            playerObj.name = NetworkServer.connections.Count + playerObj.name;
+            NetworkServer.AddPlayerForConnection(conn, playerObj);
+        }
+
+        public override void OnServerDisconnect(NetworkConnection conn)
+        {
+            NetworkServer.RemovePlayerForConnection(conn, true);
+        }
+    }   
 }

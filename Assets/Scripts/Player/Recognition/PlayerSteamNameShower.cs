@@ -1,39 +1,39 @@
-using System;
-using System.Collections;
-using System.Collections.Generic;
-using Mirror;
-using Steamworks;
-using TMPro;
-using UnityEngine;
+    using System;
+    using System.Collections;
+    using System.Collections.Generic;
+    using Mirror;
+    using TMPro;
+    using UnityEngine;
+    using UnityEngine.AI;
+    using Random = UnityEngine.Random;
 
-namespace Player.Recognition
-{
-    public class PlayerSteamNameShower : NetworkBehaviour
+    namespace Player.Recognition
     {
-        #region variables
-
-        public TMP_Text nameText;
-        
-        [SyncVar(hook = nameof(PlayerNameChanged))]
-        private string _playerName;
-
-
-        #endregion
-
-        #region Client
-        public void Start()
+        public class PlayerSteamNameShower : NetworkBehaviour
         {
-            if (!isLocalPlayer) return;
-            //Set Name to steam name if player is local player
-            _playerName = SteamClient.Name;
-            //Deactivate nametag for own player
-            nameText.gameObject.SetActive(false);
-        }
+            #region variables
 
-        private void PlayerNameChanged(string oldValue, string newValue)
-        {
-            nameText.text = newValue;
+            public TMP_Text nameText;
+            
+            [SyncVar(hook = nameof(PlayerNameChanged))]
+            private string _playerName;
+
+            #endregion
+
+            #region Client
+            public void Start()
+            {
+                if (!isLocalPlayer) return;
+                nameText.gameObject.SetActive(false);
+            }
+
+            private void PlayerNameChanged(string oldValue, string newValue)
+            {
+                string oldNew = newValue;
+                newValue = "skrrr" + oldNew;
+                nameText.text = newValue;
+            }
+
+            #endregion
         }
-        #endregion
     }
-}

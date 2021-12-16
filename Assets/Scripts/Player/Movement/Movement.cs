@@ -2,9 +2,11 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.Serialization.Formatters.Binary;
 using Mirror;
 using Misc;
+using Network;
 using Player.Network;
 using UnityEngine;
 
@@ -83,6 +85,10 @@ namespace Player.Movement
 
         [Header("Ground Settings")] [Tooltip("Layer(s) that is/are ground")]
         public LayerMask groundLayer;
+
+        [Header("Network Settings")] [Range(0.1f, 1f)]public float networkSendRate = 0.5f;
+        [SerializeField] public bool isPredictionEnabled;
+        [SerializeField] public float correctionTreshold;
         #endregion
         
         #region Data
@@ -90,83 +96,18 @@ namespace Player.Movement
         private float _rotationX;
         //determines if player is ready to jump
         private bool _readyToJump;
+
+        //holds what we have done and predicts what outcome on server will be
+        private List<PackagePlayerMovementReceive> _predictedPackages;
+        private Vector3 _lastPosition;
         #endregion
-
-        #region Server Functions
-    
-        [Command]
-        private void CmdSimulateMove(byte[] serializedBytes)
-        {
-            var playerState = Deserialize(serializedBytes);
-            if (Mathf.Abs(playerState.Input.x) > 1 || Mathf.Abs(playerState.Input.y) > 1)
-            {
-                RPCResetClient(connectionToClient, playerRigidbody.position);
-                return;
-            }
-            PhysicsMovement(playerState.Input.x, playerState.Input.y, playerState.DeltaTime);
-            if ((playerState.Position - playerRigidbody.position).magnitude > 8f)
-            {
-                RPCResetClient(connectionToClient,  playerRigidbody.position);
-            }
-        }
-
-        [Command]
-        private void CmdPlayerJumping(byte[] playerStateBytes)
-        {
-            if (!_readyToJump)
-            {
-                RPCResetClient(connectionToClient, playerRigidbody.position);
-            }
-            var playerState = Deserialize(playerStateBytes);
-            PerformJump();
-            if ((playerRigidbody.position - playerState.Position).magnitude > 5f)
-            {
-                RPCResetClient(connectionToClient, playerRigidbody.position);
-            }
-        }
-
-        [TargetRpc]
-        private void RPCResetClient(NetworkConnection connection, Vector3 serverPos)
-        {
-            transform.position = serverPos;
-        }
-
         
-        //serialize custom type over network
-        private byte[] Serialize(Network.PlayerState playerState)
-        {
-            var memoryStream = new MemoryStream();
-            var binaryWriter = new BinaryWriter((memoryStream));
-            binaryWriter.Write(playerState.Input.x);
-            binaryWriter.Write(playerState.Input.y);
-            binaryWriter.Write(playerState.Position.x);
-            binaryWriter.Write(playerState.Position.y);
-            binaryWriter.Write(playerState.Position.z);
-            binaryWriter.Write(playerState.DeltaTime);
-            binaryWriter.Close();
-            return memoryStream.ToArray();
-        }
+        #region Network
 
-        private Network.PlayerState Deserialize(byte[] bytes)
-        {
-            var memoryStream = new MemoryStream(bytes);
-            var binaryReader = new BinaryReader(memoryStream);
-            float inputX = 0,
-                inputY = 0,
-                posX = 0,
-                posY = 0,
-                posZ = 0,
-                deltaTime = 0;
-            inputX = binaryReader.ReadSingle();
-            inputY = binaryReader.ReadSingle();
-            posX = binaryReader.ReadSingle();
-            posY = binaryReader.ReadSingle();
-            posZ = binaryReader.ReadSingle();
-            deltaTime = binaryReader.ReadSingle();
-            binaryReader.Close();
-            return new Network.PlayerState(new Vector2(inputX, inputY), new Vector3(posX, posY, posZ), deltaTime);
-        }
+        private PackageManager<PackagePlayerMovement> m_playerMovementManager;
+        private PackageManager<PackagePlayerMovementReceive> m_receiveMovementManager;
         #endregion
+
 
         #region Functions Movement Related
         protected void Awake()
@@ -179,32 +120,125 @@ namespace Player.Movement
 
         private void Start()
         {
+            m_playerMovementManager = new PackageManager<PackagePlayerMovement>();
+            m_receiveMovementManager = new PackageManager<PackagePlayerMovementReceive>();
+            m_playerMovementManager.SendSpeed = networkSendRate;
+            m_receiveMovementManager.SendSpeed = networkSendRate;
+            _predictedPackages = new List<PackagePlayerMovementReceive>();
+            if(isServer)
+                m_receiveMovementManager.OnRequirePackageTransmit += TransmitPackageToClients;
             if (!isLocalPlayer) return;
+            m_playerMovementManager.OnRequirePackageTransmit += TransmitPackageToServer;
             playerCam.gameObject.SetActive(true);
         }
 
-        [ClientCallback]
+        private void TransmitPackageToServer(byte[] data)
+        {
+            CmdTransmitPackages(data);
+        }
+
+        private void TransmitPackageToClients(byte[] data)
+        {
+            RpcReceiveDataOnClient(data);
+        }
+
+        //Called from Client, Executed on Server (call to server)
+        [Command]
+        private void CmdTransmitPackages(byte[] data)
+        {
+            m_playerMovementManager.ReceiveData(data);
+        }
+
+        //called on server, executed on client
+        [ClientRpc]
+        private void RpcReceiveDataOnClient(byte[] data)
+        {
+            m_receiveMovementManager.ReceiveData(data);
+        }
+
         private void Update()
+        {
+            m_playerMovementManager.Tick();
+            m_receiveMovementManager.Tick();
+            LocalClientUpdate();
+            ServerUpdate();
+            RemoteClientUpdate();
+        }
+
+        [ServerCallback]
+        private void ServerUpdate()
+        {
+            if (!isServer || isLocalPlayer) return;
+
+            var nextPackage = m_playerMovementManager.GetNextDataReceive();
+
+            if (nextPackage == null) return;
+            
+            PhysicsMovement(nextPackage.x, nextPackage.y);
+            MouseLook(nextPackage.mouseX, nextPackage.mouseY);
+            if (transform.position == _lastPosition) return;
+            _lastPosition = transform.position;
+            m_receiveMovementManager.AddPackage(new PackagePlayerMovementReceive
+            {
+                x = transform.position.x,
+                y = transform.position.y,
+                z = transform.position.z,
+                timestamp = nextPackage.timestamp
+            });
+        }
+
+        [ClientCallback]
+        private void LocalClientUpdate()
         {
             if (!isLocalPlayer) return;
             CheckInput(); 
             CallInputFunctions();
-            MouseLook();
+            var mouseX = Input.GetAxisRaw(Misc.Other.InputAxis.MouseX);
+            var mouseY = Input.GetAxisRaw(Misc.Other.InputAxis.MouseY);
+            MouseLook(mouseX, -mouseY);
+
+            if (!isPredictionEnabled) return;
+            PhysicsMovement(Input.GetAxis(Misc.Other.InputAxis.Horizontal), Input.GetAxis(Misc.Other.InputAxis.Vertical));
+            _predictedPackages.Add(new PackagePlayerMovementReceive
+            {
+                timestamp = Time.time,
+                x = transform.position.x, 
+                y = transform.position.y,
+                z = transform.position.z
+            });
         }
 
-        [ClientCallback]
-        private void FixedUpdate()
+        private void RemoteClientUpdate()
         {
-            if (!isLocalPlayer) return;
-            PhysicsMovement(_x, _y, Time.deltaTime);
+            if (isServer) return;
+
+            var data = m_receiveMovementManager.GetNextDataReceive();
+            if (data == null) return;
+
+            if (isLocalPlayer && isPredictionEnabled)
+            {
+                var transmittedPackage = _predictedPackages.FirstOrDefault(x => Math.Abs(x.timestamp - data.timestamp) < 0.1f);
+                if (transmittedPackage == null) return;
+                if (Vector3.Distance(new Vector3(transmittedPackage.x, transmittedPackage.y, transmittedPackage.z),
+                    new Vector3(data.x, data.y, data.z)) > correctionTreshold)
+                {
+                    transform.position = new Vector3(data.x, data.y, data.z);
+                }
+
+                _predictedPackages.RemoveAll(x => x.timestamp <= data.timestamp);
+            }
+            else
+            {
+                transform.position = new Vector3(data.x, data.y, data.z);
+            }
         }
 
         //handles actual movement
-        private void PhysicsMovement(float x, float y, float delta)
+        private void PhysicsMovement(float x, float y)
         {
             var startingPos = playerRigidbody.position;
             //add extra gravity downwards
-            playerRigidbody.AddForce(Vector3.down * (delta * extraGravityMultiplicator));
+            playerRigidbody.AddForce(Vector3.down * (Time.deltaTime * extraGravityMultiplicator));
 
             //if grounded and jump key pressed, perform jump
             if (_isGrounded && _isJumping)
@@ -240,16 +274,8 @@ namespace Player.Movement
             }
             
             //add actual movement force
-            playerRigidbody.AddForce(orientation.transform.right * (x  * delta * (walkMultiplier * multiplierX * multiplierY)));
-            playerRigidbody.AddForce(orientation.transform.forward * (y * delta * (walkMultiplier * multiplierY)));
-            //Simulate Move on Server
-            if (isServer) return;
-            //dont need to spam move to server is we have no input
-            //TODO: Maybe add last state from server? So that if position doesnt change, we dont send package
-            if (Math.Abs(x) == 0 && Mathf.Abs(y) == 0) return;
-            var currentPlayerState = new Network.PlayerState(new Vector2(x, y), playerRigidbody.position, delta);
-            CmdSimulateMove(Serialize(currentPlayerState));
-
+            playerRigidbody.AddForce(orientation.transform.right * (x  * Time.deltaTime * (walkMultiplier * multiplierX * multiplierY)));
+            playerRigidbody.AddForce(orientation.transform.forward * (y * Time.deltaTime * (walkMultiplier * multiplierY)));
         }
 
         //function that handles functionality to start crouching
@@ -300,11 +326,9 @@ namespace Player.Movement
         }
 
         //Calculates and sets new Mouse position
-        private void MouseLook()
+        private void MouseLook(float mouseXInput, float mouseYInput)
         {
             var currentRotation = playerCam.transform.localRotation.eulerAngles;
-            var mouseXInput = Input.GetAxisRaw(Misc.Other.InputAxis.MouseX);
-            var mouseYInput = -Input.GetAxisRaw(Misc.Other.InputAxis.MouseY);
 
             //Calculate new value for Y-Axis rotation
             float desiredY = 0;
@@ -331,10 +355,6 @@ namespace Player.Movement
             playerRigidbody.AddForce(Vector3.up * (jumpMultiplier));
             _readyToJump = false;
             Invoke(nameof(ReactivateJump), jumpDelay);
-            if (isServer) return;
-            var playerState = new PlayerState(Vector2.zero, playerRigidbody.position, Time.deltaTime);
-            CmdPlayerJumping(Serialize(playerState));
-
         }
         
         //Reactivates Jump ability after a defined delay
@@ -355,7 +375,16 @@ namespace Player.Movement
             //TODO: Make Keys Configurable
             _isSprinting = Input.GetKeyDown(KeyCode.LeftShift);
             _isJumping = Input.GetKey(KeyCode.Space);
-            
+
+            var timeStamp = Time.time;
+            m_playerMovementManager.AddPackage(new PackagePlayerMovement
+            {
+                x = _x,
+                y = _y,
+                mouseX = Input.GetAxisRaw(Misc.Other.InputAxis.MouseX),
+                mouseY = -Input.GetAxisRaw(Misc.Other.InputAxis.MouseY),
+                timestamp =  timeStamp
+            });
         }
 
         private void CallInputFunctions()

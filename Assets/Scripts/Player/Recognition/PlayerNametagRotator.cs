@@ -3,38 +3,60 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using Mirror;
+using Network;
+using Player.Network;
 using TMPro;
 using Unity.VisualScripting;
+using UnityEditor;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace Player.Recognition{
     public class PlayerNametagRotator : NetworkBehaviour
     {
         #region variables
-
-        private PlayerNametagRotator[] _playerNametags;
-        private Dictionary<PlayerNametagRotator, TMP_Text> _nametagTexts;
+        private Dictionary<GameObject, TMP_Text> _nametagTexts;
+        private List<GameObject> _players;
 
         [Header("Nametag settings")] [Tooltip("Nametag max distance to be still visible")]
         public float maxNametagDistance = 100f;
 
+        private Text _debugText;
+        
         #endregion
 
         public void Start()
         {
             if (!isLocalPlayer) return;
-            NetworkManager.PlayerConnectedEvent += ReplaceNametags;
+            NetworkClient.RegisterHandler<PlayerJoinMessage>(ReplaceNametags);
+            CmdNewPlayerConnected();
+            _debugText = GameObject.Find("DebugText").GetComponent<Text>();
+            _debugText.text = netId.ToString();
         }
 
-        private void ReplaceNametags()
+        [Command]
+        private void CmdNewPlayerConnected()
         {
-            _nametagTexts = new Dictionary<PlayerNametagRotator, TMP_Text>();
-            //Get all Nametag Objects that are in scene and active, because we dont want to affect our own nametag
-            _playerNametags = GameObject.FindObjectsOfType<PlayerNametagRotator>().Where(nameTag => nameTag.gameObject.activeInHierarchy).ToArray();
-            //Get all texts from gameobjects
-            foreach (var player in _playerNametags)
+            var allPlayers = GameObject.FindGameObjectsWithTag("Player");
+            var playerJoinMessage = new PlayerJoinMessage
             {
-                var nameTagText = player.GetComponentInChildren<TMP_Text>();
+                players = allPlayers
+            };
+            NetworkServer.SendToAll(playerJoinMessage);
+        }
+
+        private void ReplaceNametags(PlayerJoinMessage playerJoinMessage)
+        {
+            _nametagTexts = new Dictionary<GameObject, TMP_Text>();
+            _players = playerJoinMessage.players.ToList();
+            foreach (var player in _players)
+            {
+                var nameTagText = player.GetComponentInChildren<TMP_Text>(true);
+                if (nameTagText == null)
+                {
+                    nameTagText.gameObject.SetActive(false);
+                    continue;
+                }
                 _nametagTexts.Add(player, nameTagText);
             }
         }
@@ -42,10 +64,12 @@ namespace Player.Recognition{
         private void Update()
         {
             if (!isLocalPlayer) return;
+            if (_players == null) return;
 
-            foreach (var player in _playerNametags)
+            foreach (var player in _players)
             {
                 if (!_nametagTexts.TryGetValue(player, out var text)) return;
+                if (text == null) return;
                 //scales text based on distance
                 var nameTagPlayerPos = player.transform.position;
                 var distanceToPlayer = Vector3.Distance(transform.position, nameTagPlayerPos);
