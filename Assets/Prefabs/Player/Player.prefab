@@ -423,7 +423,6 @@ GameObject:
   - component: {fileID: 2016631391344879041}
   - component: {fileID: 516745943312935927}
   - component: {fileID: 1648503179667737369}
-  - component: {fileID: 9015884730227472452}
   - component: {fileID: 7924782033299091906}
   m_Layer: 0
   m_Name: Player
@@ -502,7 +501,10 @@ MonoBehaviour:
     m_Bits: 8
   networkSendRate: 0.1
   isPredictionEnabled: 1
-  correctionTreshold: 1
+  correctionTreshold: 1.5
+  serverPos: {fileID: 0}
+  clientPos: {fileID: 0}
+  diffPos: {fileID: 0}
 --- !u!114 &1665277528958907872
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -578,35 +580,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   color: {r: 1, g: 1, b: 1, a: 1}
   padding: 2
---- !u!114 &9015884730227472452
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1665277528958907883}
-  m_Enabled: 0
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 2f74aedd71d9a4f55b3ce499326d45fb, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  syncMode: 0
-  syncInterval: 0.1
-  clientAuthority: 0
-  sendInterval: 0.05
-  syncPosition: 1
-  syncRotation: 1
-  syncScale: 1
-  interpolatePosition: 1
-  interpolateRotation: 1
-  interpolateScale: 1
-  bufferTimeMultiplier: 1
-  bufferSizeLimit: 64
-  catchupThreshold: 4
-  catchupMultiplier: 0.1
-  showGizmos: 1
-  showOverlay: 1
-  overlayColor: {r: 0, g: 0, b: 0, a: 0.5}
 --- !u!114 &7924782033299091906
 MonoBehaviour:
   m_ObjectHideFlags: 0

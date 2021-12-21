@@ -7,7 +7,10 @@ public class PackagePlayerMovement
 {
     public float x;
     public float y;
-    public float mouseX;
-    public float mouseY;
+    public float orientationY;
+    public bool grounded;
+    public bool jumping;
+    public bool crouching;
+    public float deltaTime;
     public float timestamp;
 }

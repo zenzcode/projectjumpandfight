@@ -8,6 +8,7 @@ using Mirror;
 using Misc;
 using Network;
 using Player.Network;
+using TMPro;
 using UnityEngine;
 
 //Physic Based Movement for Jump and Fight
@@ -89,6 +90,12 @@ namespace Player.Movement
         [Header("Network Settings")] [Range(0.1f, 1f)]public float networkSendRate = 0.5f;
         [SerializeField] public bool isPredictionEnabled;
         [SerializeField] public float correctionTreshold;
+
+        [Header("Debug Info")] [SerializeField]
+        public TMP_Text serverPos;
+
+        [SerializeField] public TMP_Text clientPos;
+        [SerializeField] public TMP_Text diffPos;
         #endregion
         
         #region Data
@@ -130,6 +137,9 @@ namespace Player.Movement
             if (!isLocalPlayer) return;
             m_playerMovementManager.OnRequirePackageTransmit += TransmitPackageToServer;
             playerCam.gameObject.SetActive(true);
+            serverPos = GameObject.Find("Text_ServerPos").GetComponent<TMP_Text>();
+            clientPos = GameObject.Find("Text_ClientPos").GetComponent<TMP_Text>();
+            diffPos = GameObject.Find("Text_Diff").GetComponent<TMP_Text>();
         }
 
         private void TransmitPackageToServer(byte[] data)
@@ -173,9 +183,8 @@ namespace Player.Movement
             var nextPackage = m_playerMovementManager.GetNextDataReceive();
 
             if (nextPackage == null) return;
-            
-            PhysicsMovement(nextPackage.x, nextPackage.y);
-            MouseLook(nextPackage.mouseX, nextPackage.mouseY);
+            orientation.transform.localRotation = Quaternion.Euler(0, nextPackage.orientationY, 0);
+            PhysicsMovement(nextPackage.deltaTime, nextPackage.grounded, nextPackage.jumping, nextPackage.crouching, nextPackage.x, nextPackage.y);
             if (transform.position == _lastPosition) return;
             _lastPosition = transform.position;
             m_receiveMovementManager.AddPackage(new PackagePlayerMovementReceive
@@ -196,9 +205,8 @@ namespace Player.Movement
             var mouseX = Input.GetAxisRaw(Misc.Other.InputAxis.MouseX);
             var mouseY = Input.GetAxisRaw(Misc.Other.InputAxis.MouseY);
             MouseLook(mouseX, -mouseY);
-
             if (!isPredictionEnabled) return;
-            PhysicsMovement(Input.GetAxis(Misc.Other.InputAxis.Horizontal), Input.GetAxis(Misc.Other.InputAxis.Vertical));
+            PhysicsMovement(Time.deltaTime, _isGrounded, _isJumping, _isCrouching, _x, _y);
             _predictedPackages.Add(new PackagePlayerMovementReceive
             {
                 timestamp = Time.time,
@@ -217,8 +225,12 @@ namespace Player.Movement
 
             if (isLocalPlayer && isPredictionEnabled)
             {
-                var transmittedPackage = _predictedPackages.FirstOrDefault(x => Math.Abs(x.timestamp - data.timestamp) < 0.1f);
+                var transmittedPackage =
+                    _predictedPackages.FirstOrDefault(x => x.timestamp == data.timestamp);
                 if (transmittedPackage == null) return;
+                serverPos.SetText($"Server Pos: X:{data.x}; Y:{data.y}; Z:{data.z}");
+                clientPos.SetText($"Client Pos: X:{transmittedPackage.x}; Y:{transmittedPackage.y}; Z:{transmittedPackage.z}");
+                diffPos.SetText($"Diff Pos: X:{Mathf.Abs(data.x-transmittedPackage.x)}; Y:{Mathf.Abs(data.y-transmittedPackage.y)}; Z:{Mathf.Abs(data.z-transmittedPackage.z)}");
                 if (Vector3.Distance(new Vector3(transmittedPackage.x, transmittedPackage.y, transmittedPackage.z),
                     new Vector3(data.x, data.y, data.z)) > correctionTreshold)
                 {
@@ -234,14 +246,13 @@ namespace Player.Movement
         }
 
         //handles actual movement
-        private void PhysicsMovement(float x, float y)
+        private void PhysicsMovement(float delta, bool isGrounded, bool isJumping, bool isCrouching, float x, float y)
         {
-            var startingPos = playerRigidbody.position;
             //add extra gravity downwards
-            playerRigidbody.AddForce(Vector3.down * (Time.deltaTime * extraGravityMultiplicator));
+            playerRigidbody.AddForce(Vector3.down * (delta * extraGravityMultiplicator));
 
             //if grounded and jump key pressed, perform jump
-            if (_isGrounded && _isJumping)
+            if (isGrounded && isJumping)
             {
                 PerformJump();
             }
@@ -250,7 +261,7 @@ namespace Player.Movement
             var mag = FindVelRelativeToLook();
             
             //perform counter movement so we dont go yeet into space
-            CounterMovement(mag);
+            CounterMovement(delta, isGrounded, isJumping, isCrouching, x, y, mag);
 
             //check if we go brrrr, then reset input
             if (x > 0 && mag.x > playerMaxSpeed) x = 0;
@@ -261,21 +272,21 @@ namespace Player.Movement
             var multiplierX = 1f;
             var multiplierY = 1f;
 
-            if (!_isGrounded)
+            if (!isGrounded)
             {
                 multiplierX = 0.5f;
                 multiplierY = 0.5f;
             }
             
             //when sliding
-            if (_isGrounded && _isCrouching)
+            if (isGrounded && isCrouching)
             {
                 multiplierY = 0f;
             }
             
             //add actual movement force
-            playerRigidbody.AddForce(orientation.transform.right * (x  * Time.deltaTime * (walkMultiplier * multiplierX * multiplierY)));
-            playerRigidbody.AddForce(orientation.transform.forward * (y * Time.deltaTime * (walkMultiplier * multiplierY)));
+            playerRigidbody.AddForce(orientation.transform.right * (x  * delta * (walkMultiplier * multiplierX * multiplierY)));
+            playerRigidbody.AddForce(orientation.transform.forward * (y * delta * (walkMultiplier * multiplierY)));
         }
 
         //function that handles functionality to start crouching
@@ -299,29 +310,28 @@ namespace Player.Movement
         }
 
         //Adds some counter movement
-        private void CounterMovement(Vector2 relativeVelocity)
+        private void CounterMovement(float deltaTime, bool isGrounded, bool isJumping, bool isCrouching, float x, float y, Vector2 relativeVelocity)
         {
             //no counter movement when in air
-            if (!_isGrounded || _isJumping) return;
+            if (!isGrounded || isJumping) return;
             
             //sliding should not be that heavy slowed down as other
-            if (_isCrouching)
+            if (isCrouching)    
             {
-                playerRigidbody.AddForce(walkMultiplier * Time.deltaTime * -playerRigidbody.velocity.normalized * slidingCounterMovement);
+                playerRigidbody.AddForce(walkMultiplier * deltaTime * -playerRigidbody.velocity.normalized * slidingCounterMovement);
                 return;
             }
             
-            //TODO: Maybe changeup counter movement a bit, feels quite unsatisfying
             //handling letting go of key,                                       switch directions
-            if (Math.Abs(relativeVelocity.x) > 0.01f && Math.Abs(_x) < 0.05f || relativeVelocity.x < -0.01f && _x > 0 || relativeVelocity.x > 0.01f && _x < 0)
+            if (Math.Abs(relativeVelocity.x) > 0.01f && Math.Abs(x) < 0.05f || relativeVelocity.x < -0.01f && x > 0 || relativeVelocity.x > 0.01f && x < 0)
             {
-                playerRigidbody.AddForce(orientation.transform.right * (walkMultiplier * (Time.deltaTime * -relativeVelocity.x * counterModifier)));
+                playerRigidbody.AddForce(orientation.transform.right * (walkMultiplier * (deltaTime * -relativeVelocity.x * counterModifier)));
             }
             
             //handling letting go of key,                                       switch directions
-            if (Math.Abs(relativeVelocity.y) > 0.01f && Math.Abs(_y) < 0.05f || relativeVelocity.y < -0.01f && _y > 0 || relativeVelocity.y > 0.01f && _y < 0)
+            if (Math.Abs(relativeVelocity.y) > 0.01f && Math.Abs(y) < 0.05f || relativeVelocity.y < -0.01f && y > 0 || relativeVelocity.y > 0.01f && y < 0)
             {
-                playerRigidbody.AddForce(orientation.transform.forward * (walkMultiplier * (Time.deltaTime * -relativeVelocity.y * counterModifier)));
+                playerRigidbody.AddForce(orientation.transform.forward * (walkMultiplier * (deltaTime * -relativeVelocity.y * counterModifier)));
             }
         }
 
@@ -343,14 +353,25 @@ namespace Player.Movement
             playerCam.transform.localRotation = Quaternion.Euler(_rotationX, desiredY, 0);
             //set orientation to be facing forward in new direction
             orientation.transform.localRotation = Quaternion.Euler(0, desiredY, 0);
+            var timeStamp = Time.time;
+            m_playerMovementManager.AddPackage(new PackagePlayerMovement
+            {
+                x = _x,
+                y = _y,
+                grounded = _isGrounded,
+                jumping = _isJumping,
+                crouching = _isCrouching,
+                orientationY = orientation.transform.localRotation.eulerAngles.y,
+                deltaTime = Time.deltaTime,
+                timestamp =  timeStamp
+            });
         }
         
         //Checks and Performs jump
         private void PerformJump()
         {
             //TODO: Make Player Jump Over server and kms because this will take ages again haha kms kms 
-            if (!isLocalPlayer) return;
-            if (!_readyToJump || !_isGrounded) return;
+            if (!_readyToJump) return;
             //Add Jump Force to player
             playerRigidbody.AddForce(Vector3.up * (jumpMultiplier));
             _readyToJump = false;
@@ -375,16 +396,6 @@ namespace Player.Movement
             //TODO: Make Keys Configurable
             _isSprinting = Input.GetKeyDown(KeyCode.LeftShift);
             _isJumping = Input.GetKey(KeyCode.Space);
-
-            var timeStamp = Time.time;
-            m_playerMovementManager.AddPackage(new PackagePlayerMovement
-            {
-                x = _x,
-                y = _y,
-                mouseX = Input.GetAxisRaw(Misc.Other.InputAxis.MouseX),
-                mouseY = -Input.GetAxisRaw(Misc.Other.InputAxis.MouseY),
-                timestamp =  timeStamp
-            });
         }
 
         private void CallInputFunctions()
