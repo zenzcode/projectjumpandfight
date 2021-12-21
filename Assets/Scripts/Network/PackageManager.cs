@@ -28,9 +28,9 @@ namespace Network
         {
             get 
             {
-                //We dont want a sendspeed faster than 0.1f
-                if (m_sendSpeed < 0.1f)
-                    m_sendSpeed = 0.1f;
+                //We dont want a sendspeed faster than 0.01f
+                if (m_sendSpeed < 0.01f)
+                    m_sendSpeed = 0.01f;
                 return m_sendSpeed;
             }
             set

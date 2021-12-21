@@ -7,6 +7,9 @@ public class PackagePlayerMovement
 {
     public float x;
     public float y;
+    public float posX;
+    public float posY;
+    public float posZ;
     public float orientationY;
     public bool grounded;
     public bool jumping;

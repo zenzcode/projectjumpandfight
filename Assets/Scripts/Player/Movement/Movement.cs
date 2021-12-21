@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.Serialization.Formatters.Binary;
+using DG.Tweening;
 using Mirror;
 using Misc;
 using Network;
@@ -87,7 +88,7 @@ namespace Player.Movement
         [Header("Ground Settings")] [Tooltip("Layer(s) that is/are ground")]
         public LayerMask groundLayer;
 
-        [Header("Network Settings")] [Range(0.1f, 1f)]public float networkSendRate = 0.5f;
+        [Header("Network Settings")] [Range(0.01f, 1f)]public float networkSendRate = 0.5f;
         [SerializeField] public bool isPredictionEnabled;
         [SerializeField] public float correctionTreshold;
 
@@ -183,6 +184,8 @@ namespace Player.Movement
             var nextPackage = m_playerMovementManager.GetNextDataReceive();
 
             if (nextPackage == null) return;
+            var clientPos = new Vector3(nextPackage.posX, nextPackage.posY, nextPackage.posZ);
+            transform.position = clientPos;
             orientation.transform.localRotation = Quaternion.Euler(0, nextPackage.orientationY, 0);
             PhysicsMovement(nextPackage.deltaTime, nextPackage.grounded, nextPackage.jumping, nextPackage.crouching, nextPackage.x, nextPackage.y);
             if (transform.position == _lastPosition) return;
@@ -230,7 +233,6 @@ namespace Player.Movement
                 if (transmittedPackage == null) return;
                 serverPos.SetText($"Server Pos: X:{data.x}; Y:{data.y}; Z:{data.z}");
                 clientPos.SetText($"Client Pos: X:{transmittedPackage.x}; Y:{transmittedPackage.y}; Z:{transmittedPackage.z}");
-                diffPos.SetText($"Diff Pos: X:{Mathf.Abs(data.x-transmittedPackage.x)}; Y:{Mathf.Abs(data.y-transmittedPackage.y)}; Z:{Mathf.Abs(data.z-transmittedPackage.z)}");
                 if (Vector3.Distance(new Vector3(transmittedPackage.x, transmittedPackage.y, transmittedPackage.z),
                     new Vector3(data.x, data.y, data.z)) > correctionTreshold)
                 {
@@ -361,6 +363,9 @@ namespace Player.Movement
                 grounded = _isGrounded,
                 jumping = _isJumping,
                 crouching = _isCrouching,
+                posX = transform.position.x,
+                posY = transform.position.y,
+                posZ = transform.position.z,
                 orientationY = orientation.transform.localRotation.eulerAngles.y,
                 deltaTime = Time.deltaTime,
                 timestamp =  timeStamp
