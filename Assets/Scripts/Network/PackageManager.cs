@@ -28,9 +28,9 @@ namespace Network
         {
             get 
             {
-                //We dont want a sendspeed faster than 0.01f
-                if (m_sendSpeed < 0.01f)
-                    m_sendSpeed = 0.01f;
+                //We dont want a sendspeed faster than 128 Tick
+                if (m_sendSpeed < 0.0078125f)
+                    m_sendSpeed = 0.0078125f;
                 return m_sendSpeed;
             }
             set
@@ -85,7 +85,7 @@ namespace Network
             m_nextTick += 1 / SendSpeed * Time.fixedDeltaTime;
 
             if (!(m_nextTick >= 1) || Packages.Count <= 0) return;
-            m_nextTick -= 1;
+            m_nextTick = 0;
 
             var packageBytes = CreateBytes();
             Packages.Clear();

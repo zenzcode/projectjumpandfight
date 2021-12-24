@@ -1,10 +1,14 @@
 using System.Collections;
 using System.Collections.Generic;
+using Network.Helpers;
 using UnityEngine;
 
 [System.Serializable]
 public class PackagePlayerMovementReceive
 {
-    public float x, y, z;
+    public Vector3f position;
+    public PackagePlayerMovement lastMove;
+    public Vector3f rigidVelocity;
+    public Vector3f angularRigidVelocity;
     public float timestamp;
 }

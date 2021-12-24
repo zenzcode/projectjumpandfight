@@ -8,8 +8,10 @@ using DG.Tweening;
 using Mirror;
 using Misc;
 using Network;
+using Network.Helpers;
 using Player.Network;
 using TMPro;
+using Unity.VisualScripting;
 using UnityEngine;
 
 //Physic Based Movement for Jump and Fight
@@ -88,7 +90,7 @@ namespace Player.Movement
         [Header("Ground Settings")] [Tooltip("Layer(s) that is/are ground")]
         public LayerMask groundLayer;
 
-        [Header("Network Settings")] [Range(0.01f, 1f)]public float networkSendRate = 0.5f;
+        [Header("Network Settings")] [Range(0.0f, 1f)]public float networkSendRate = 0.5f;
         [SerializeField] public bool isPredictionEnabled;
         [SerializeField] public float correctionTreshold;
 
@@ -114,6 +116,8 @@ namespace Player.Movement
 
         private PackageManager<PackagePlayerMovement> m_playerMovementManager;
         private PackageManager<PackagePlayerMovementReceive> m_receiveMovementManager;
+
+        private float _tickTime = 0;
         #endregion
 
 
@@ -182,20 +186,19 @@ namespace Player.Movement
             if (!isServer || isLocalPlayer) return;
 
             var nextPackage = m_playerMovementManager.GetNextDataReceive();
-
             if (nextPackage == null) return;
-            var clientPos = new Vector3(nextPackage.posX, nextPackage.posY, nextPackage.posZ);
-            transform.position = clientPos;
+
             orientation.transform.localRotation = Quaternion.Euler(0, nextPackage.orientationY, 0);
             PhysicsMovement(nextPackage.deltaTime, nextPackage.grounded, nextPackage.jumping, nextPackage.crouching, nextPackage.x, nextPackage.y);
             if (transform.position == _lastPosition) return;
             _lastPosition = transform.position;
             m_receiveMovementManager.AddPackage(new PackagePlayerMovementReceive
             {
-                x = transform.position.x,
-                y = transform.position.y,
-                z = transform.position.z,
-                timestamp = nextPackage.timestamp
+                position = new Vector3f(playerRigidbody.position.x, playerRigidbody.position.y, playerRigidbody.position.z),
+                lastMove = nextPackage,
+                timestamp = nextPackage.timestamp,
+                rigidVelocity =  new Vector3f(playerRigidbody.velocity.x, playerRigidbody.velocity.y, playerRigidbody.velocity.z),
+                angularRigidVelocity = new Vector3f(playerRigidbody.angularVelocity.x, playerRigidbody.angularVelocity.y, playerRigidbody.angularVelocity.z)
             });
         }
 
@@ -208,15 +211,19 @@ namespace Player.Movement
             var mouseX = Input.GetAxisRaw(Misc.Other.InputAxis.MouseX);
             var mouseY = Input.GetAxisRaw(Misc.Other.InputAxis.MouseY);
             MouseLook(mouseX, -mouseY);
-            if (!isPredictionEnabled) return;
-            PhysicsMovement(Time.deltaTime, _isGrounded, _isJumping, _isCrouching, _x, _y);
-            _predictedPackages.Add(new PackagePlayerMovementReceive
+            var move = new PackagePlayerMovement
             {
+                crouching = _isCrouching,
+                deltaTime = Time.deltaTime,
+                grounded = _isGrounded,
+                jumping = _isJumping,
+                orientationY = orientation.transform.localRotation.eulerAngles.y,
                 timestamp = Time.time,
-                x = transform.position.x, 
-                y = transform.position.y,
-                z = transform.position.z
-            });
+                x = _x,
+                y = _y
+            };
+            if (!isPredictionEnabled) return;
+            PhysicsMovement(move.deltaTime, move.grounded, move.jumping, move.crouching, move.x, move.y);
         }
 
         private void RemoteClientUpdate()
@@ -225,25 +232,22 @@ namespace Player.Movement
 
             var data = m_receiveMovementManager.GetNextDataReceive();
             if (data == null) return;
-
+            
             if (isLocalPlayer && isPredictionEnabled)
             {
-                var transmittedPackage =
-                    _predictedPackages.FirstOrDefault(x => x.timestamp == data.timestamp);
-                if (transmittedPackage == null) return;
-                serverPos.SetText($"Server Pos: X:{data.x}; Y:{data.y}; Z:{data.z}");
-                clientPos.SetText($"Client Pos: X:{transmittedPackage.x}; Y:{transmittedPackage.y}; Z:{transmittedPackage.z}");
-                if (Vector3.Distance(new Vector3(transmittedPackage.x, transmittedPackage.y, transmittedPackage.z),
-                    new Vector3(data.x, data.y, data.z)) > correctionTreshold)
+                if(Vector3.Distance(playerRigidbody.position, data.position.ToVector()) > correctionTreshold)
                 {
-                    transform.position = new Vector3(data.x, data.y, data.z);
+                    playerRigidbody.position = data.position.ToVector();
+                    playerRigidbody.velocity = data.rigidVelocity.ToVector();
+                    playerRigidbody.angularVelocity = data.angularRigidVelocity.ToVector();
+                    Physics.Simulate(Time.fixedDeltaTime);
                 }
-
-                _predictedPackages.RemoveAll(x => x.timestamp <= data.timestamp);
+                
+                    
             }
             else
             {
-                transform.position = new Vector3(data.x, data.y, data.z);
+                playerRigidbody.position = data.position.ToVector();
             }
         }
 
@@ -285,10 +289,10 @@ namespace Player.Movement
             {
                 multiplierY = 0f;
             }
-            
             //add actual movement force
             playerRigidbody.AddForce(orientation.transform.right * (x  * delta * (walkMultiplier * multiplierX * multiplierY)));
             playerRigidbody.AddForce(orientation.transform.forward * (y * delta * (walkMultiplier * multiplierY)));
+            Physics.Simulate(Time.fixedDeltaTime);
         }
 
         //function that handles functionality to start crouching
@@ -363,10 +367,7 @@ namespace Player.Movement
                 grounded = _isGrounded,
                 jumping = _isJumping,
                 crouching = _isCrouching,
-                posX = transform.position.x,
-                posY = transform.position.y,
-                posZ = transform.position.z,
-                orientationY = orientation.transform.localRotation.eulerAngles.y,
+                orientationY = orientation.localRotation.eulerAngles.y,
                 deltaTime = Time.deltaTime,
                 timestamp =  timeStamp
             });
@@ -419,7 +420,7 @@ namespace Player.Movement
         //not good at physics nor maths, ngl
         private Vector2 FindVelRelativeToLook()
         {
-            var lookAngle = orientation.transform.eulerAngles.y;
+            var lookAngle = orientation.transform.localRotation.eulerAngles.y;
             var moveAngle = Mathf.Atan2(playerRigidbody.velocity.x, playerRigidbody.velocity.z) * Mathf.Rad2Deg;
 
             var u = Mathf.DeltaAngle(lookAngle, moveAngle);

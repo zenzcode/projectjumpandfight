@@ -499,7 +499,7 @@ MonoBehaviour:
   groundLayer:
     serializedVersion: 2
     m_Bits: 8
-  networkSendRate: 0.1
+  networkSendRate: 0
   isPredictionEnabled: 1
   correctionTreshold: 1.5
   serverPos: {fileID: 0}
