@@ -30,8 +30,6 @@ namespace Player.Recognition{
             if (!isLocalPlayer) return;
             NetworkClient.RegisterHandler<PlayerJoinMessage>(ReplaceNametags);
             CmdNewPlayerConnected();
-            _debugText = GameObject.Find("DebugText").GetComponent<Text>();
-            _debugText.text = netId.ToString();
         }
 
         [Command]

@@ -2,6 +2,7 @@
     using System.Collections;
     using System.Collections.Generic;
     using Mirror;
+    using Steamworks;
     using TMPro;
     using UnityEngine;
     using UnityEngine.AI;
@@ -15,8 +16,13 @@
 
             public TMP_Text nameText;
             
-            [SyncVar(hook = nameof(PlayerNameChanged))]
-            private string _playerName;
+            [SyncVar(hook = nameof(SteamIDChanged))]
+            private ulong _steamId;
+
+            public ulong SteamId
+            {
+                set => _steamId = value;
+            }
 
             #endregion
 
@@ -27,11 +33,10 @@
                 nameText.gameObject.SetActive(false);
             }
 
-            private void PlayerNameChanged(string oldValue, string newValue)
+            private void SteamIDChanged(ulong oldValue, ulong newValue)
             {
-                string oldNew = newValue;
-                newValue = "skrrr" + oldNew;
-                nameText.text = newValue;
+                var playerName = SteamFriends.GetFriendPersonaName(new CSteamID(newValue));
+                nameText.SetText(playerName);
             }
 
             #endregion

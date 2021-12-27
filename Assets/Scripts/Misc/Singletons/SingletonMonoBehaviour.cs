@@ -8,8 +8,8 @@ namespace Misc.Singletons
     public class SingletonMonoBehaviour<T> : MonoBehaviour where T : MonoBehaviour
     {
         private static T _instance;
-        
-        public static T Instance { get; }
+
+        public static T Instance => _instance;
     
         protected virtual void Awake()
         {

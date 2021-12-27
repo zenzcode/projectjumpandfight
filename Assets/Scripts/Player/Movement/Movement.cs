@@ -94,12 +94,6 @@ namespace Player.Movement
         [Header("Network Settings")] [Range(0.0f, 1f)]public float networkSendRate = 0.5f;
         [SerializeField] public bool isPredictionEnabled;
         [SerializeField] public float correctionTreshold;
-
-        [Header("Debug Info")] [SerializeField]
-        public TMP_Text serverPos;
-
-        [SerializeField] public TMP_Text clientPos;
-        [SerializeField] public TMP_Text diffPos;
         #endregion
         
         #region Data
@@ -155,9 +149,6 @@ namespace Player.Movement
             if (!isLocalPlayer) return;
             m_playerMovementManager.OnRequirePackageTransmit += TransmitPackageToServer;
             playerCam.gameObject.SetActive(true);
-            serverPos = GameObject.Find("Text_ServerPos").GetComponent<TMP_Text>();
-            clientPos = GameObject.Find("Text_ClientPos").GetComponent<TMP_Text>();
-            diffPos = GameObject.Find("Text_Diff").GetComponent<TMP_Text>();
         }
 
         private void TransmitPackageToServer(byte[] data)
