@@ -12,5 +12,5 @@ public class PackagePlayerMovement
     public bool jumping;
     public bool crouching;
     public float deltaTime;
-    public float timestamp;
+    public int tickNr;
 }

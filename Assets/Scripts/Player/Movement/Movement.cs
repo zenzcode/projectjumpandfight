@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.Serialization.Formatters.Binary;
 using DG.Tweening;
+using kcp2k;
 using Mirror;
 using Misc;
 using Network;
@@ -117,7 +118,14 @@ namespace Player.Movement
         private PackageManager<PackagePlayerMovement> m_playerMovementManager;
         private PackageManager<PackagePlayerMovementReceive> m_receiveMovementManager;
 
+        //Simulating our own FixedUpdate
         private float _tickTime = 0;
+        
+        //Saves move to List to maybe resimulate if determinism fails
+        private ClientState[] _clientBuffer;
+        
+        //Ticknr to send with package
+        private int _tickNr = 0;
         #endregion
 
 
@@ -132,6 +140,11 @@ namespace Player.Movement
 
         private void Start()
         {
+            _clientBuffer = new ClientState[2048];
+            for (var i = 0; i < _clientBuffer.Length; ++i)
+            {
+                _clientBuffer[i] = new ClientState();
+            }
             m_playerMovementManager = new PackageManager<PackagePlayerMovement>();
             m_receiveMovementManager = new PackageManager<PackagePlayerMovementReceive>();
             m_playerMovementManager.SendSpeed = networkSendRate;
@@ -173,6 +186,7 @@ namespace Player.Movement
 
         private void Update()
         {
+            _tickTime += Time.deltaTime;
             m_playerMovementManager.Tick();
             m_receiveMovementManager.Tick();
             LocalClientUpdate();
@@ -196,7 +210,7 @@ namespace Player.Movement
             {
                 position = new Vector3f(playerRigidbody.position.x, playerRigidbody.position.y, playerRigidbody.position.z),
                 lastMove = nextPackage,
-                timestamp = nextPackage.timestamp,
+                tickNr = nextPackage.tickNr + 1,
                 rigidVelocity =  new Vector3f(playerRigidbody.velocity.x, playerRigidbody.velocity.y, playerRigidbody.velocity.z),
                 angularRigidVelocity = new Vector3f(playerRigidbody.angularVelocity.x, playerRigidbody.angularVelocity.y, playerRigidbody.angularVelocity.z)
             });
@@ -211,19 +225,18 @@ namespace Player.Movement
             var mouseX = Input.GetAxisRaw(Misc.Other.InputAxis.MouseX);
             var mouseY = Input.GetAxisRaw(Misc.Other.InputAxis.MouseY);
             MouseLook(mouseX, -mouseY);
-            var move = new PackagePlayerMovement
-            {
-                crouching = _isCrouching,
-                deltaTime = Time.deltaTime,
-                grounded = _isGrounded,
-                jumping = _isJumping,
-                orientationY = orientation.transform.localRotation.eulerAngles.y,
-                timestamp = Time.time,
-                x = _x,
-                y = _y
-            };
-            if (!isPredictionEnabled) return;
-            PhysicsMovement(move.deltaTime, move.grounded, move.jumping, move.crouching, move.x, move.y);
+            if (!isPredictionEnabled) return;         
+            var bufferSlot = _tickNr % _clientBuffer.Length;
+            _clientBuffer[bufferSlot].x = _x;
+            _clientBuffer[bufferSlot].y = _y;
+            _clientBuffer[bufferSlot].grounded = _isGrounded;
+            _clientBuffer[bufferSlot].jumping = _isJumping;
+            _clientBuffer[bufferSlot].crouching = _isCrouching;
+            _clientBuffer[bufferSlot].orientationY = orientation.eulerAngles.y;
+            _clientBuffer[bufferSlot].rigidPos = Vector3f.FromVector(playerRigidbody.position);
+            _clientBuffer[bufferSlot].rigidVel = Vector3f.FromVector(playerRigidbody.velocity);
+            _clientBuffer[bufferSlot].rigidAngularVel = Vector3f.FromVector(playerRigidbody.angularVelocity);
+            PhysicsMovement(Time.deltaTime, _isGrounded, _isJumping, _isCrouching, _x, _y);
         }
 
         private void RemoteClientUpdate()
@@ -232,18 +245,35 @@ namespace Player.Movement
 
             var data = m_receiveMovementManager.GetNextDataReceive();
             if (data == null) return;
+
             
             if (isLocalPlayer && isPredictionEnabled)
-            {
-                if(Vector3.Distance(playerRigidbody.position, data.position.ToVector()) > correctionTreshold)
+            {            
+                var bufferSlot = data.tickNr % _clientBuffer.Length;
+                var positionOffset = data.position - _clientBuffer[bufferSlot].rigidPos;
+                if (positionOffset.ToVector().sqrMagnitude > 0.0000001f)
                 {
                     playerRigidbody.position = data.position.ToVector();
                     playerRigidbody.velocity = data.rigidVelocity.ToVector();
                     playerRigidbody.angularVelocity = data.angularRigidVelocity.ToVector();
-                    Physics.Simulate(Time.fixedDeltaTime);
+
+                    var rewindTickNr = data.tickNr;
+                    while (rewindTickNr < _tickNr)
+                    {
+                        var rewindBufferSlot = rewindTickNr % _clientBuffer.Length;
+                        _clientBuffer[rewindBufferSlot].rigidPos = Vector3f.FromVector(playerRigidbody.position);
+                        _clientBuffer[rewindBufferSlot].rigidVel = Vector3f.FromVector(playerRigidbody.velocity);
+                        _clientBuffer[rewindBufferSlot].rigidAngularVel = Vector3f.FromVector(playerRigidbody.angularVelocity);
+                        _clientBuffer[rewindBufferSlot].x = _x;
+                        _clientBuffer[rewindBufferSlot].y = _y;
+                        _clientBuffer[rewindBufferSlot].grounded = _isGrounded;
+                        _clientBuffer[rewindBufferSlot].jumping = _isJumping;
+                        _clientBuffer[rewindBufferSlot].crouching = _isCrouching;
+                        _clientBuffer[rewindBufferSlot].orientationY = orientation.eulerAngles.y;
+                        PhysicsMovement(Time.deltaTime, _isGrounded, _isJumping, _isCrouching, _x, _y);
+                        ++rewindTickNr;
+                    }
                 }
-                
-                    
             }
             else
             {
@@ -254,45 +284,51 @@ namespace Player.Movement
         //handles actual movement
         private void PhysicsMovement(float delta, bool isGrounded, bool isJumping, bool isCrouching, float x, float y)
         {
-            //add extra gravity downwards
-            playerRigidbody.AddForce(Vector3.down * (delta * extraGravityMultiplicator));
+            while (_tickTime >= Time.fixedDeltaTime)
+            {  
+                _tickTime -= Time.fixedDeltaTime; 
+                //add extra gravity downwards
+                playerRigidbody.AddForce(Vector3.down * (delta * extraGravityMultiplicator));
 
-            //if grounded and jump key pressed, perform jump
-            if (isGrounded && isJumping)
-            {
-                PerformJump();
+                //if grounded and jump key pressed, perform jump
+                if (isGrounded && isJumping)
+                {
+                    PerformJump();
+                }
+            
+                //calculate velocity relative to look 
+                var mag = FindVelRelativeToLook();
+            
+                //perform counter movement so we dont go yeet into space
+                CounterMovement(delta, isGrounded, isJumping, isCrouching, x, y, mag);
+
+                //check if we go brrrr, then reset input
+                if (x > 0 && mag.x > playerMaxSpeed) x = 0;
+                if (x < 0 && mag.x < -playerMaxSpeed) x = 0;
+                if (y > 0 && mag.y > playerMaxSpeed) y = 0;
+                if (y < 0 && mag.y < -playerMaxSpeed) y = 0;
+
+                var multiplierX = 1f;
+                var multiplierY = 1f;
+
+                if (!isGrounded)
+                {
+                    multiplierX = 0.5f;
+                    multiplierY = 0.5f;
+                }
+            
+                //when sliding
+                if (isGrounded && isCrouching)
+                {
+                    multiplierY = 0f;
+                }
+                //add actual movement force
+                playerRigidbody.AddForce(orientation.transform.right * (x  * delta * (walkMultiplier * multiplierX * multiplierY)));
+                playerRigidbody.AddForce(orientation.transform.forward * (y * delta * (walkMultiplier * multiplierY)));
+                Physics.Simulate(Time.fixedDeltaTime);
+                ++_tickNr;
             }
             
-            //calculate velocity relative to look 
-            var mag = FindVelRelativeToLook();
-            
-            //perform counter movement so we dont go yeet into space
-            CounterMovement(delta, isGrounded, isJumping, isCrouching, x, y, mag);
-
-            //check if we go brrrr, then reset input
-            if (x > 0 && mag.x > playerMaxSpeed) x = 0;
-            if (x < 0 && mag.x < -playerMaxSpeed) x = 0;
-            if (y > 0 && mag.y > playerMaxSpeed) y = 0;
-            if (y < 0 && mag.y < -playerMaxSpeed) y = 0;
-
-            var multiplierX = 1f;
-            var multiplierY = 1f;
-
-            if (!isGrounded)
-            {
-                multiplierX = 0.5f;
-                multiplierY = 0.5f;
-            }
-            
-            //when sliding
-            if (isGrounded && isCrouching)
-            {
-                multiplierY = 0f;
-            }
-            //add actual movement force
-            playerRigidbody.AddForce(orientation.transform.right * (x  * delta * (walkMultiplier * multiplierX * multiplierY)));
-            playerRigidbody.AddForce(orientation.transform.forward * (y * delta * (walkMultiplier * multiplierY)));
-            Physics.Simulate(Time.fixedDeltaTime);
         }
 
         //function that handles functionality to start crouching
@@ -369,7 +405,7 @@ namespace Player.Movement
                 crouching = _isCrouching,
                 orientationY = orientation.localRotation.eulerAngles.y,
                 deltaTime = Time.deltaTime,
-                timestamp =  timeStamp
+                tickNr = _tickNr
             });
         }
         

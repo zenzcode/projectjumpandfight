@@ -10,5 +10,5 @@ public class PackagePlayerMovementReceive
     public PackagePlayerMovement lastMove;
     public Vector3f rigidVelocity;
     public Vector3f angularRigidVelocity;
-    public float timestamp;
+    public int tickNr;
 }

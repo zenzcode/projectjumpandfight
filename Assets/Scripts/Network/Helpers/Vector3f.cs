@@ -65,6 +65,12 @@ namespace Network.Helpers
         {
             return new Vector3f(one.x / other.x, one.y / other.y, one.z / other.z);
         }
+        
+        //Statics
+        public static Vector3f FromVector(Vector3 vector)
+        {
+            return new Vector3f(vector.x, vector.y, vector.z);
+        }
     }
 
 }
