@@ -16,6 +16,7 @@ namespace Player.Recognition
         #region variables
 
         public RawImage avatarImage;
+        public TMP_Text usernameText;
 
         [SyncVar(hook = nameof(SteamIDChanged))]
         private ulong _steamId;

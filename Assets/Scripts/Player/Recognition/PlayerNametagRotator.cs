@@ -15,7 +15,7 @@ namespace Player.Recognition{
     public class PlayerNametagRotator : NetworkBehaviour
     {
         #region variables
-        private Dictionary<GameObject, TMP_Text> _nametagTexts;
+        private Dictionary<GameObject, GameObject> _nametagTexts;
         private List<GameObject> _players;
 
         [Header("Nametag settings")] [Tooltip("Nametag max distance to be still visible")]
@@ -45,17 +45,17 @@ namespace Player.Recognition{
 
         private void ReplaceNametags(PlayerJoinMessage playerJoinMessage)
         {
-            _nametagTexts = new Dictionary<GameObject, TMP_Text>();
+            _nametagTexts = new Dictionary<GameObject, GameObject>();
             _players = playerJoinMessage.players.ToList();
             foreach (var player in _players)
             {
-                var nameTagText = player.GetComponentInChildren<TMP_Text>(true);
-                if (nameTagText == null)
+                var nameTag = player.GetComponentInChildren<HorizontalLayoutGroup>(true).gameObject;
+                if (nameTag == null)
                 {
-                    nameTagText.gameObject.SetActive(false);
+                    nameTag.gameObject.SetActive(false);
                     continue;
                 }
-                _nametagTexts.Add(player, nameTagText);
+                _nametagTexts.Add(player, nameTag);
             }
         }
 
@@ -66,16 +66,16 @@ namespace Player.Recognition{
 
             foreach (var player in _players)
             {
-                if (!_nametagTexts.TryGetValue(player, out var text)) return;
-                if (text == null) return;
+                if (!_nametagTexts.TryGetValue(player, out var nameTag)) return;
+                if (nameTag == null) return;
                 //scales text based on distance
                 var nameTagPlayerPos = player.transform.position;
                 var distanceToPlayer = Vector3.Distance(transform.position, nameTagPlayerPos);
                 var nameTagSize = 1 -  (distanceToPlayer / maxNametagDistance);
-                text.transform.localScale = new Vector3(nameTagSize, nameTagSize, -nameTagSize);
+                nameTag.transform.localScale = new Vector3(nameTagSize, nameTagSize, -nameTagSize);
                 //Calculate Rotation based on difference in x,z position
                 var newRotation = GetRotationRelativeToPlayerPos(nameTagPlayerPos);
-                text.transform.localRotation = Quaternion.Euler(newRotation);
+                nameTag.transform.localRotation = Quaternion.Euler(newRotation);
             }
         }
 

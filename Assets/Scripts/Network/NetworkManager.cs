@@ -11,6 +11,8 @@ namespace Network
 {
     public class NetworkManager : Mirror.NetworkManager
     {
+
+        public bool isSteam;
         
         public override void OnServerAddPlayer(NetworkConnection conn)
         {
@@ -18,6 +20,7 @@ namespace Network
             playerObj.name = $"{playerPrefab.name} [connId={conn.connectionId}]";
             NetworkServer.AddPlayerForConnection(conn, playerObj);
 
+            if (!SteamManager.Initialized || !isSteam) return;
             var steamID = SteamMatchmaking.GetLobbyMemberByIndex(SteamLobby.Instance.SteamLobbyId, numPlayers - 1);
 
             var steamNameShower = conn.identity.GetComponent<PlayerSteamNameShower>();
