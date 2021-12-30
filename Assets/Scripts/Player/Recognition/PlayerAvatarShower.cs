@@ -16,7 +16,7 @@ namespace Player.Recognition
         #region variables
 
         public RawImage avatarImage;
-        public TMP_Text usernameText;
+        private int _tries = 0;
 
         [SyncVar(hook = nameof(SteamIDChanged))]
         private ulong _steamId;
@@ -45,22 +45,37 @@ namespace Player.Recognition
         }
 
         private Texture2D LoadImage()
-        { 
-            var avatar = SteamFriends.GetLargeFriendAvatar(new CSteamID(_steamId));
-          if (avatar == -1) return null;
+        {
+            while (true)
+            {
+                if (_tries >= 3) return null;
+                var avatar = SteamFriends.GetLargeFriendAvatar(new CSteamID(_steamId));
+                if (avatar == -1)
+                {
+                    ++_tries;
+                    continue;
+                }
 
-          var valid = SteamUtils.GetImageSize(avatar, out var width, out var height);
-          if (!valid) return null;
-          var image = new byte[width * height * 4 * sizeof(char)];
+                var valid = SteamUtils.GetImageSize(avatar, out var width, out var height);
+                if (!valid)
+                {
+                    ++_tries;
+                    continue;
+                }
+                var image = new byte[width * height * 4 * sizeof(char)];
 
-          valid = SteamUtils.GetImageRGBA(avatar, image, (int)(4 * height * width * sizeof(char)));
-          if (!valid) return null;
-          var texture = new Texture2D((int)width, (int)height, TextureFormat.RGBA32, false, false);
-          texture.LoadRawTextureData(image);
-          texture.Apply();
+                valid = SteamUtils.GetImageRGBA(avatar, image, (int) (4 * height * width * sizeof(char)));
+                if (!valid)
+                {
+                    ++_tries;
+                    continue;
+                }
+                var texture = new Texture2D((int) width, (int) height, TextureFormat.RGBA32, false, false);
+                texture.LoadRawTextureData(image);
+                texture.Apply();
 
-          return texture;
-
+                return texture;
+            }
         }
 
         private void OnAvatarLoaded(AvatarImageLoaded_t callback)

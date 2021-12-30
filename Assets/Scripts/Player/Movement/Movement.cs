@@ -102,8 +102,6 @@ namespace Player.Movement
         //determines if player is ready to jump
         private bool _readyToJump;
 
-        //holds what we have done and predicts what outcome on server will be
-        private List<PackagePlayerMovementReceive> _predictedPackages;
         private Vector3 _lastPosition;
         #endregion
         
@@ -126,14 +124,6 @@ namespace Player.Movement
         #region Functions Movement Related
         protected void Awake()
         {
-            _playerHeight = transform.localScale.y;
-            Cursor.visible = false;
-            Cursor.lockState = CursorLockMode.Locked;
-            _readyToJump = true;
-        }
-
-        private void Start()
-        {
             _clientBuffer = new ClientState[2048];
             for (var i = 0; i < _clientBuffer.Length; ++i)
             {
@@ -143,7 +133,14 @@ namespace Player.Movement
             m_receiveMovementManager = new PackageManager<PackagePlayerMovementReceive>();
             m_playerMovementManager.SendSpeed = networkSendRate;
             m_receiveMovementManager.SendSpeed = networkSendRate;
-            _predictedPackages = new List<PackagePlayerMovementReceive>();
+            _playerHeight = transform.localScale.y;
+            Cursor.visible = false;
+            Cursor.lockState = CursorLockMode.Locked;
+            _readyToJump = true;
+        }
+
+        private void Start()
+        {
             if(isServer)
                 m_receiveMovementManager.OnRequirePackageTransmit += TransmitPackageToClients;
             if (!isLocalPlayer) return;
@@ -184,11 +181,11 @@ namespace Player.Movement
             ServerUpdate();
             RemoteClientUpdate();
         }
-
+        
         [ServerCallback]
         private void ServerUpdate()
         {
-            if (!isServer || isLocalPlayer) return;
+            if (!isServer) return;
 
             var nextPackage = m_playerMovementManager.GetNextDataReceive();
             if (nextPackage == null) return;
@@ -221,7 +218,7 @@ namespace Player.Movement
             _clientBuffer[bufferSlot].x = _x;
             _clientBuffer[bufferSlot].y = _y;
             _clientBuffer[bufferSlot].grounded = _isGrounded;
-            _clientBuffer[bufferSlot].jumping = _isJumping;
+            _clientBuffer[ bufferSlot].jumping = _isJumping;
             _clientBuffer[bufferSlot].crouching = _isCrouching;
             _clientBuffer[bufferSlot].orientationY = orientation.eulerAngles.y;
             _clientBuffer[bufferSlot].rigidPos = Vector3f.FromVector(playerRigidbody.position);
@@ -272,6 +269,12 @@ namespace Player.Movement
             }
         }
 
+        private void FixedUpdate()
+        {
+            if (!isServer || isLocalPlayer) return;
+            Physics.Simulate(Time.fixedDeltaTime);
+        }
+
         //handles actual movement
         private void PhysicsMovement(float delta, bool isGrounded, bool isJumping, bool isCrouching, float x, float y)
         {
@@ -316,8 +319,11 @@ namespace Player.Movement
                 //add actual movement force
                 playerRigidbody.AddForce(orientation.transform.right * (x  * delta * (walkMultiplier * multiplierX * multiplierY)));
                 playerRigidbody.AddForce(orientation.transform.forward * (y * delta * (walkMultiplier * multiplierY)));
-                Physics.Simulate(Time.fixedDeltaTime);
                 ++_tickNr;
+                if (isLocalPlayer)
+                {
+                    Physics.Simulate(Time.fixedDeltaTime);
+                }
             }
             
         }
@@ -386,7 +392,6 @@ namespace Player.Movement
             playerCam.transform.localRotation = Quaternion.Euler(_rotationX, desiredY, 0);
             //set orientation to be facing forward in new direction
             orientation.transform.localRotation = Quaternion.Euler(0, desiredY, 0);
-            var timeStamp = Time.time;
             m_playerMovementManager.AddPackage(new PackagePlayerMovement
             {
                 x = _x,
@@ -403,7 +408,6 @@ namespace Player.Movement
         //Checks and Performs jump
         private void PerformJump()
         {
-            //TODO: Make Player Jump Over server and kms because this will take ages again haha kms kms 
             if (!_readyToJump) return;
             //Add Jump Force to player
             playerRigidbody.AddForce(Vector3.up * (jumpMultiplier));
